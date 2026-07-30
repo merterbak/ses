@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ses</title>
+<link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+  <div class="topbar">
+    <span class="mark">ses</span>
+    <nav class="tabs">
+      <button data-page="chat" class="active">Chat</button>
+      <button data-page="speak">Speak</button>
+      <button data-page="transcribe">Transcribe</button>
+      <button data-page="models">Models</button>
+    </nav>
+    <span class="status"><span class="dot" id="dot"></span><span id="statusText">connecting…</span></span>
+  </div>
+
+  <main class="app">
+    <!-- ===== CHAT ===== -->
+    <section class="page active" id="page-chat">
+      <aside class="convbar">
+        <button class="ghost newchat" id="newChatBtn">＋ New chat</button>
+        <div class="convlist" id="convList"></div>
+      </aside>
+
+      <div class="chatmain">
+        <div class="chathead">
+          <select id="brainModel" title="LLM"></select>
+          <label class="hint" style="display:flex;align-items:center;gap:6px">
+            <input type="checkbox" id="speakReplies" checked> speak replies
+          </label>
+          <button class="ghost" id="optionsBtn" title="voice, transcription and reply options">⚙ options</button>
+          <button class="ghost" id="stopSpeakBtn" title="stop speaking" disabled>⏹ stop voice</button>
+          <span class="brainstat" id="brainStatus">looking for a local LLM…</span>
+
+          <!-- everything `ses talk` takes as a flag, available here too -->
+          <div class="options" id="optionsPanel" hidden>
+            <h3>Voice</h3>
+            <label for="chatTtsModel">Speak with</label>
+            <select id="chatTtsModel" title="TTS model"></select>
+            <label for="chatVoice">Voice</label>
+            <select id="chatVoice" title="voice"></select>
+            <label for="chatSpeed">Speed</label>
+            <div class="sliderrow">
+              <input type="range" id="chatSpeed" min="0.5" max="2" step="0.1" value="1">
+              <span class="speedval" id="chatSpeedVal">1.0×</span>
+            </div>
+
+            <h3>Hearing</h3>
+            <label for="chatSttModel">Transcribe with</label>
+            <select id="chatSttModel" title="STT model"></select>
+
+            <h3>Replies</h3>
+            <label class="toggle" for="chatThink">
+              <input type="checkbox" id="chatThink" checked> Show the model's reasoning
+            </label>
+            <label for="chatSystem">System prompt</label>
+            <textarea id="chatSystem" spellcheck="false"></textarea>
+            <div class="foot">Same knobs as <code>ses talk</code> — voice, speed, models,
+              <code>--think</code> and <code>--system</code>.</div>
+          </div>
+        </div>
+
+        <div class="chatscroll">
+          <div class="chatlog" id="chatlog">
+            <div class="hint">Ask anything. Whisper hears you, your local LLM thinks, Kokoro answers
+              out loud — all on this machine, and every chat is saved on the left.</div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="inner">
+            <button class="ghost" id="chatRecBtn">● talk</button>
+            <input type="text" id="chatText" placeholder="Message ses…">
+            <button id="chatSendBtn">Send</button>
+          </div>
+          <div class="meta" id="chatMeta"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SPEAK ===== -->
+    <section class="page" id="page-speak">
+      <div class="panel">
+        <h1>🗣️ Speak</h1>
+        <div class="sub">Text → voice, with 54 Kokoro voices. Runs on this machine.</div>
+        <div class="row">
+          <select id="ttsModel" title="TTS model"></select>
+          <select id="voice" title="voice"></select>
+        </div>
+        <div class="row">
+          <span class="hint">speed</span>
+          <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1">
+          <span class="speedval" id="speedVal">1.0×</span>
+        </div>
+        <textarea id="ttsText">Ses runs Kokoro and Whisper entirely on this machine. No cloud, no keys, no telemetry — just a quiet little voice server.</textarea>
+        <div class="row">
+          <button id="speakBtn">Generate &amp; play</button>
+          <button class="ghost" id="dlBtn" disabled>Download wav</button>
+        </div>
+        <audio id="player" controls></audio>
+        <div class="meta" id="ttsMeta"></div>
+      </div>
+    </section>
+
+    <!-- ===== TRANSCRIBE ===== -->
+    <section class="page" id="page-transcribe">
+      <div class="panel">
+        <h1>🎙️ Transcribe</h1>
+        <div class="sub">Voice → text with Whisper or Parakeet. Drop a file or record.</div>
+        <div class="row">
+          <select id="sttModel" title="STT model"></select>
+          <button class="ghost" id="recBtn">● record</button>
+        </div>
+        <div class="drop" id="drop">drop an audio file here or click to choose<br>
+          <span style="font-size:12px">wav · mp3 · flac · ogg · m4a</span></div>
+        <input type="file" id="file" accept="audio/*" hidden>
+        <div class="result" id="sttOut"><span class="hint">transcript appears here</span></div>
+        <div class="row" style="margin-top:12px">
+          <button class="ghost" id="copyBtn" disabled>copy text</button>
+        </div>
+        <div class="meta" id="sttMeta"></div>
+      </div>
+    </section>
+
+    <!-- ===== MODELS ===== -->
+    <section class="page" id="page-models">
+      <div class="panel" style="max-width:900px">
+        <h1>📦 Models</h1>
+        <div class="sub">Everything you can install, and whether it runs on this machine.</div>
+        <div class="machine" id="machine">
+          <div class="spec"><span class="k">machine</span><span class="v">detecting…</span></div>
+        </div>
+        <div id="catalog"><div class="hint">loading catalog…</div></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

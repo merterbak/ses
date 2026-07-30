@@ -1,0 +1,25 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# tooling
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# os
+.DS_Store
+
+# local experiments
+*.wav
+*.mp3
+!docs/**/*.mp3
+scratch/
+
+# local
+.claude/
