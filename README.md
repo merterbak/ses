@@ -46,7 +46,7 @@ macOS, Linux or Windows, Python 3.10+.
 
 ```bash
 uv tool install ses             # core
-uv tool install 'ses[default]'  
+uv tool install 'ses[default]'  # adds whisper.cpp, Vosk, Chatterbox, learned VAD
 ```
 
 The only permission ses ever asks for is mic access, the first time you listen.
@@ -106,22 +106,24 @@ For Codex, put the same command in `~/.codex/config.toml` under
 ## The models
 
 80 curated models across 12 runtimes, 75 of them on every platform. Each one
-was picked by download numbers first, then verified with a real recording.
+was picked by download numbers first, then verified with a real recording. ⭐
+marks the three ses recommends; they are also the three that run everywhere.
 
 | speech to text | size | notes |
 |---|---:|---|
 | `whisper-turbo` ⭐ | 1.5 GB | large-v3 accuracy at a fraction of the cost |
 | `whisper-tiny` … `whisper-large` | 71 MB – 2.9 GB | every size, 99 languages |
 | `whisper-cpp-*` | 31 MB – 1.1 GB | GGML quantized, smallest downloads |
-| `qwen-asr-large` ⭐ | 2.3 GB | 5.76% WER, best Turkish in our tests |
+| `qwen-asr-large` | 2.3 GB | 5.76% WER, best Turkish in our tests (Apple Silicon) |
 | `canary` · `parakeet` | 2.4 – 4.7 GB | open ASR leaderboard toppers, 25 European languages |
+| `parakeet-v2` | 2.4 GB | English only, the fastest of the three |
 | `vosk-*` | ~40 MB | six languages, tiny, CPU only |
 
 | text to speech | size | notes |
 |---|---:|---|
 | `kokoro` ⭐ | 340 MB | most downloaded open voice model, 54 voices, 8 languages |
-| `tts-<language>` ⭐ | ~61 MB | 49 languages via Piper, ~20× real time |
-| `chatterbox-turbo` | 2.8 GB | voice cloning from a short sample |
+| `tts-<language>` ⭐ | ~61 MB | 49 languages via Piper, ~30× real time |
+| `chatterbox-turbo` | 2.8 GB | voice cloning from a sample, English, slower than real time |
 | `qwen-tts` · `omnivoice` | 1.6 GB | newer multilingual families (Apple Silicon) |
 
 ```bash
@@ -149,6 +151,14 @@ Mic in, Whisper to text, your Ollama or LM Studio model thinks, Kokoro speaks.
 Hands free through voice activity detection, or `--push-to-talk` for Enter.
 The voice starts on the first finished sentence while the model is still
 writing. Three local models passing audio around your own machine.
+
+ses does not run the thinking model itself, it borrows one from Ollama. `ses
+pull` reaches those too, including any GGUF repo on Hugging Face:
+
+```bash
+ses pull llama3.2                                   # curated brain
+ses pull hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF
+```
 
 ## The server
 

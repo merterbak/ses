@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ses"
-version = "0.0.1"
+version = "0.0.2"
 description = "Ollama for voice: pull, hot-swap and serve local speech models (TTS + STT) on any machine, fully offline."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -48,7 +48,7 @@ dependencies = [
 [project.optional-dependencies]
 mcp = ["mcp>=1.2,<2"]
 onnx-asr = ["onnx-asr>=0.12"]
-mlx-audio = ["mlx-audio>=0.4 ; platform_machine == 'arm64' and sys_platform == 'darwin'"]
+mlx-audio = ["mlx-audio>=0.4.6 ; platform_machine == 'arm64' and sys_platform == 'darwin'"]
 whisper-cpp = ["pywhispercpp>=1.5"]
 vosk = [
     "vosk==0.3.44 ; sys_platform == 'darwin'",
