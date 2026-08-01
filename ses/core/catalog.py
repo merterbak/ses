@@ -2,7 +2,7 @@ import importlib.util
 import re
 import time
 from . import ecosystem, hardware, store
-from .registry import BRAINS, FEATURED, REGISTRY
+from .registry import BRAINS, FEATURED, RECOMMENDED, REGISTRY
 
 HF_API = "https://huggingface.co/api/models"
 CACHE_SECONDS = 1800
@@ -37,6 +37,8 @@ _cache = {}
 
 ENGINE_PACKAGES = {
     "chatterbox": "chatterbox",
+    "transformers-stt": "transformers",
+    "transformers-tts": "transformers",
     "faster-whisper": "faster_whisper",
     "kokoro-onnx": "kokoro_onnx",
     "mlx-audio-stt": "mlx_audio",
@@ -141,12 +143,32 @@ def entry_files(entry):
     return files
 
 
+def llm_compatibility(repo, files):
+    if any(name.lower().endswith(".gguf") for name in files):
+        return {
+            "engine": "ollama",
+            "status": "compatible",
+            "reason": "GGUF weights, Ollama can pull these straight from Hugging Face",
+            "pull": f"ses pull hf.co/{repo}",
+            "extra": "ollama",
+        }
+    return {
+        "engine": None,
+        "status": "needs-ollama",
+        "reason": "ses borrows its LLM from Ollama, and Ollama needs GGUF weights",
+        "pull": None,
+    }
+
+
 def detect_hf_engine(entry):
     repo = entry["id"]
     lowered = repo.lower()
     tags = entry_tags(entry)
     library = str(entry.get("library_name") or "").lower()
     files = entry_files(entry)
+
+    if entry.get("pipeline_tag") == TASKS["llm"]:
+        return llm_compatibility(repo, files)
 
     is_ctranslate2 = "ctranslate2" in tags or library == "ctranslate2"
     has_ctranslate2_layout = {
@@ -202,12 +224,51 @@ def detect_hf_engine(entry):
             "pull": f"ses pull {repo} --engine mlx-whisper",
         }
 
+    transformers = transformers_engine_for(entry)
+    if transformers:
+        engine, family = transformers
+        return {
+            "engine": engine,
+            "status": "compatible",
+            "reason": f"transformers implements the {family} architecture",
+            "pull": f"ses pull {repo} --engine {engine}",
+            "extra": "transformers",
+        }
+
     return {
         "engine": None,
         "status": "unknown-format",
         "reason": "No verified ses runtime for this repository layout",
         "pull": None,
     }
+
+
+def transformers_architectures():
+    try:
+        from transformers.models.auto.modeling_auto import (
+            MODEL_FOR_CTC_MAPPING_NAMES,
+            MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES,
+            MODEL_FOR_TEXT_TO_WAVEFORM_MAPPING_NAMES,
+        )
+    except ImportError:
+        return None
+    stt = set(MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES) | set(MODEL_FOR_CTC_MAPPING_NAMES)
+    return stt, set(MODEL_FOR_TEXT_TO_WAVEFORM_MAPPING_NAMES)
+
+
+def transformers_engine_for(entry):
+    known = transformers_architectures()
+    if known is None:
+        return None
+    stt, tts = known
+    family = str((entry.get("config") or {}).get("model_type") or "").lower()
+    if not family:
+        return None
+    if family in tts:
+        return "transformers-tts", family
+    if family in stt:
+        return "transformers-stt", family
+    return None
 
 
 def inspect_hf_repo(repo):
@@ -293,14 +354,20 @@ def fetch_hf(pipeline_tag, sort_field):
     import httpx
 
     ram_gb = hardware.total_ram_gb()
+    query = {
+        "pipeline_tag": pipeline_tag,
+        "sort": sort_field,
+        "direction": -1,
+        "limit": FETCH_LIMIT,
+    }
+    if pipeline_tag == TASKS["llm"]:
+        query["filter"] = "gguf"
+
     try:
         response = httpx.get(
             HF_API,
             params={
-                "pipeline_tag": pipeline_tag,
-                "sort": sort_field,
-                "direction": -1,
-                "limit": FETCH_LIMIT,
+                **query,
                 "expand[]": [
                     "safetensors",
                     "downloads",
@@ -309,6 +376,7 @@ def fetch_hf(pipeline_tag, sort_field):
                     "pipeline_tag",
                     "tags",
                     "siblings",
+                    "config",
                 ],
             },
             timeout=10,
@@ -332,6 +400,15 @@ def fetch_hf(pipeline_tag, sort_field):
             size_gb = round(curated_backend.size_mb / GB, 2)
             fit = backend_fit(curated_backend, ram_gb)
             size_basis = "curated download"
+        elif compatibility["engine"] == "ollama":
+            size_gb = estimated_size_gb(parameters)
+            fit = hardware.fit(size_gb, ram_gb)
+            size_basis = "Ollama picks one 4-bit quantization" if size_gb else "unknown"
+        elif compatibility["pull"]:
+            stored = repo_storage_gb(entry["id"])
+            size_gb = stored or estimated_size_gb(parameters)
+            fit = hardware.fit(size_gb, ram_gb)
+            size_basis = "what ses will download" if stored else "estimated 4-bit weights"
         else:
             size_gb = estimated_size_gb(parameters)
             fit = hardware.fit(size_gb, ram_gb)
@@ -352,6 +429,24 @@ def fetch_hf(pipeline_tag, sort_field):
             }
         )
     return models
+
+
+_storage_cache = {}
+
+
+def repo_storage_gb(repo):
+    if repo in _storage_cache:
+        return _storage_cache[repo]
+
+    from . import download
+
+    try:
+        total = download.remote_size(repo)
+    except Exception:
+        total = None
+    size = round(total / 1e9, 2) if total else None
+    _storage_cache[repo] = size
+    return size
 
 
 def build(installed_brains=None):
@@ -390,6 +485,7 @@ def build(installed_brains=None):
                 "backends": [backend_payload(item) for item in spec.backends],
                 "installed": store.is_installed(spec.name),
                 "featured": spec.name in featured_rank,
+                "recommended": RECOMMENDED.get(spec.name),
                 "fit": fit,
                 "pull": f"ses pull {spec.name}" if backend else None,
             }
@@ -397,6 +493,7 @@ def build(installed_brains=None):
 
     speech.sort(
         key=lambda model: (
+            0 if model["recommended"] else 1,
             featured_rank.get(model["name"], len(featured_rank)),
             model["size_gb"] or 0,
             model["name"],

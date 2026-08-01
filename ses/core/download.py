@@ -6,7 +6,16 @@ import zipfile
 from pathlib import Path
 from .. import SesError
 
-IGNORE_PATTERNS = [".gitattributes", "*.mp3"]
+IGNORE_PATTERNS = [
+    ".gitattributes",
+    "*.mp3",
+    "*.h5",
+    "*.msgpack",
+    "*.tflite",
+    "tf_model*",
+    "flax_model*",
+]
+TORCH_DUPLICATES = ["pytorch_model*.bin"]
 HF_API = "https://huggingface.co/api/models"
 
 
@@ -14,7 +23,7 @@ def matches(path, patterns):
     return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 
 
-def remote_size(repo, allow_patterns=None):
+def remote_listing(repo):
     import httpx
 
     try:
@@ -25,16 +34,27 @@ def remote_size(repo, allow_patterns=None):
             follow_redirects=True,
         )
         response.raise_for_status()
-        listing = response.json()
     except Exception:
         return None
+    return [entry for entry in response.json() if entry.get("type") == "file"]
 
+
+def skip_patterns(paths):
+    if any(fnmatch.fnmatch(path, "*.safetensors") for path in paths):
+        return IGNORE_PATTERNS + TORCH_DUPLICATES
+    return IGNORE_PATTERNS
+
+
+def remote_size(repo, allow_patterns=None):
+    listing = remote_listing(repo)
+    if listing is None:
+        return None
+
+    skips = skip_patterns([entry["path"] for entry in listing])
     total = 0
     for entry in listing:
-        if entry.get("type") != "file":
-            continue
         path = entry["path"]
-        if matches(path, IGNORE_PATTERNS):
+        if matches(path, skips):
             continue
         if allow_patterns and not matches(path, allow_patterns):
             continue
@@ -85,6 +105,8 @@ def snapshot(repo, dest, allow_patterns=None, on_progress=None):
     from huggingface_hub import snapshot_download
 
     patterns = list(allow_patterns) if allow_patterns else None
+    listing = remote_listing(repo)
+    skips = skip_patterns([entry["path"] for entry in listing]) if listing else IGNORE_PATTERNS
     total = remote_size(repo, allow_patterns) if on_progress else None
 
     if not (on_progress and total):
@@ -92,7 +114,7 @@ def snapshot(repo, dest, allow_patterns=None, on_progress=None):
             repo_id=repo,
             local_dir=dest,
             allow_patterns=patterns,
-            ignore_patterns=IGNORE_PATTERNS,
+            ignore_patterns=skips,
         )
         return
 
@@ -118,7 +140,7 @@ def snapshot(repo, dest, allow_patterns=None, on_progress=None):
         repo_id=repo,
         local_dir=dest,
         allow_patterns=patterns,
-        ignore_patterns=IGNORE_PATTERNS,
+        ignore_patterns=skips,
         tqdm_class=AggregatingTqdm,
     )
     on_progress(total, total)

@@ -19,7 +19,7 @@ def register(app, _context):
             models = brain.models()
         except Exception:
             models = []
-        preferred = paths.default_for("brain")
+        preferred = paths.default_for("llm")
         return {
             "available": True,
             "backend": brain.label,
@@ -35,7 +35,7 @@ def register(app, _context):
         brain = llm.detect()
         if brain is None:
             raise SesError(llm.NO_BRAIN_HINT)
-        model = brain.resolve_model(request.model or paths.default_for("brain"))
+        model = brain.resolve_model(request.model or paths.default_for("llm"))
 
         conversation, messages = build_messages(request)
         if not messages:

@@ -91,8 +91,17 @@ def config():
     return read_json(config_path(), {}) or {}
 
 
+ROLE_ALIASES = {"brain": "llm"}
+
+
+def canonical_role(role):
+    return ROLE_ALIASES.get(role, role)
+
+
 def set_default(role, model):
+    role = canonical_role(role)
     settings = config()
+    settings.pop("brain", None)
     if model is None:
         settings.pop(role, None)
     else:
@@ -101,7 +110,13 @@ def set_default(role, model):
 
 
 def default_for(role):
-    from_env = os.environ.get(f"SES_{role.upper()}")
-    if from_env:
-        return from_env
-    return config().get(role)
+    role = canonical_role(role)
+    for key in (role, *(k for k, v in ROLE_ALIASES.items() if v == role)):
+        from_env = os.environ.get(f"SES_{key.upper()}")
+        if from_env:
+            return from_env
+    settings = config()
+    for key in (role, *(k for k, v in ROLE_ALIASES.items() if v == role)):
+        if settings.get(key):
+            return settings[key]
+    return None

@@ -139,6 +139,18 @@ def default_tts():
     return paths.default_for("tts") or DEFAULT_TTS
 
 
+def default_voice():
+    return paths.default_for("voice")
+
+
+def default_speed():
+    stored = paths.default_for("speed")
+    try:
+        return float(stored) if stored else 1.0
+    except ValueError:
+        return 1.0
+
+
 def default_stt():
     from .. import DEFAULT_STT
 

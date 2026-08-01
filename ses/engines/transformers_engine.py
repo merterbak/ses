@@ -69,16 +69,32 @@ class TransformersTtsEngine:
 
     def __init__(self, model_dir):
         import torch
-        from transformers import AutoTokenizer, VitsModel
+        from transformers import AutoModelForTextToWaveform, AutoProcessor, AutoTokenizer
 
         self.torch = torch
         directory = str(model_dir)
-        self.model = VitsModel.from_pretrained(directory)
-        self.tokenizer = AutoTokenizer.from_pretrained(directory)
+        self.model = AutoModelForTextToWaveform.from_pretrained(directory)
         self.model.eval()
-        self.rate = int(self.model.config.sampling_rate)
+        self.family = getattr(self.model.config, "model_type", "")
+        self.vits = self.family == "vits"
+        try:
+            self.processor = AutoProcessor.from_pretrained(directory)
+        except (OSError, ValueError):
+            self.processor = AutoTokenizer.from_pretrained(directory)
+        self.rate = self.sample_rate()
+
+    def sample_rate(self):
+        config = self.model.config
+        for holder in (config, getattr(config, "generation_config", None), self.model):
+            rate = getattr(holder, "sampling_rate", None) or getattr(holder, "sample_rate", None)
+            if rate:
+                return int(rate)
+        return 24000
 
     def voices(self):
+        presets = getattr(self.processor, "speaker_embeddings", None)
+        if isinstance(presets, dict) and presets:
+            return sorted(presets)
         speakers = getattr(self.model.config, "num_speakers", 1) or 1
         if speakers > 1:
             return [str(index) for index in range(speakers)]
@@ -90,17 +106,30 @@ class TransformersTtsEngine:
             raise SesError("nothing to say, input text is empty")
 
         original = getattr(self.model, "speaking_rate", None)
-        if original is not None and speed:
+        if self.vits and original is not None and speed:
             self.model.speaking_rate = original * speed
 
-        inputs = self.tokenizer(text, return_tensors="pt")
         try:
             with self.torch.no_grad():
-                waveform = self.model(**inputs).waveform[0].cpu().numpy()
+                waveform = self.generate(text, voice)
         except Exception as error:
             raise SesError(f"transformers failed to synthesize: {error}") from error
         finally:
             if original is not None:
                 self.model.speaking_rate = original
 
-        return np.asarray(waveform, dtype=np.float32), self.rate
+        return np.asarray(waveform, dtype=np.float32).reshape(-1), self.rate
+
+    def generate(self, text, voice):
+        if self.vits:
+            inputs = self.processor(text, return_tensors="pt")
+            return self.model(**inputs).waveform[0].cpu().numpy()
+
+        options = {}
+        if voice and voice != "default":
+            options["voice_preset"] = voice
+        try:
+            inputs = self.processor(text, return_tensors="pt", **options)
+        except TypeError:
+            inputs = self.processor(text, return_tensors="pt")
+        return self.model.generate(**inputs).cpu().numpy()

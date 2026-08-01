@@ -19,7 +19,15 @@ from ...audio import (
 from ...core import conversations, llm, paths
 from ...core.llm import THINKING
 from ...core.text import SentenceChunker, collapse
-from ..ui import console, default_stt, default_tts, fail, load_model
+from ..ui import (
+    console,
+    default_speed,
+    default_stt,
+    default_tts,
+    default_voice,
+    fail,
+    load_model,
+)
 
 MIN_SPEECH_SAMPLES = WHISPER_SAMPLE_RATE // 4
 
@@ -119,11 +127,11 @@ class SpeechPlayer:
 
 
 def talk(
-    brain: str = typer.Option(None, "--brain", "-b", help="LLM to think with (default: ses use brain)."),
-    voice: str = typer.Option("af_heart", "--voice", "-v"),
+    brain: str = typer.Option(None, "--brain", "-b", help="LLM to think with (default: ses use llm)."),
+    voice: str = typer.Option(None, "--voice", "-v"),
     stt: str = typer.Option(None, "--stt", help="STT model (default: whisper-base)"),
     tts: str = typer.Option(None, "--tts", help="TTS model (default: tts-english)"),
-    speed: float = typer.Option(1.0, "--speed", "-s", min=0.5, max=2.0),
+    speed: float = typer.Option(None, "--speed", "-s", min=0.5, max=2.0),
     push_to_talk: bool = typer.Option(
         False, "--push-to-talk", "-p", help="Press Enter to send each turn instead of auto-detecting."
     ),
@@ -133,7 +141,7 @@ def talk(
     system: str = typer.Option(VOICE_SYSTEM_PROMPT, "--system", help="System prompt for the brain."),
 ):
     """Voice-chat with a local LLM: mic → Whisper → LLM → Kokoro."""
-    connection, model = connect(brain or paths.default_for("brain"))
+    connection, model = connect(brain or paths.default_for("llm"))
     ears = load_model(stt or default_stt())
     mouth = load_model(tts or default_tts())
 
@@ -169,7 +177,12 @@ def talk(
         console.print(f"[bold cyan]you[/bold cyan]  {heard}")
         messages.append({"role": "user", "content": heard})
 
-        reply, interrupted = speak_reply(connection, model, messages, mouth, voice, speed, think)
+        reply, interrupted = speak_reply(
+            connection, model, messages, mouth,
+            voice or default_voice(),
+            speed if speed is not None else default_speed(),
+            think,
+        )
         if interrupted:
             break
         messages.append({"role": "assistant", "content": reply})
@@ -268,19 +281,24 @@ def chat(
     cont: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent conversation."),
     conversation: str = typer.Option(None, "--conversation", help="Continue a specific conversation."),
     speak: bool = typer.Option(False, "--speak", help="Also read replies aloud."),
-    voice: str = typer.Option("af_heart", "--voice", "-v"),
+    voice: str = typer.Option(None, "--voice", "-v"),
+    speed: float = typer.Option(None, "--speed", "-s", min=0.5, max=2.0),
     think: bool = typer.Option(
         True, "--think/--no-think", help="Show the model's reasoning (--no-think hides and skips it)."
     ),
     system: str = typer.Option(CHAT_SYSTEM_PROMPT, "--system", help="System prompt."),
 ):
     """Text chat with your local LLM, saved to history (see: ses history)."""
-    connection, model = connect(brain or paths.default_for("brain"), allow_pull=False)
+    connection, model = connect(brain or paths.default_for("llm"), allow_pull=False)
     current = open_conversation(conversation, cont, model)
     mouth = load_model(default_tts()) if speak else None
 
     def turn(user_text):
-        run_chat_turn(connection, model, current, user_text, system, think, mouth, voice)
+        run_chat_turn(
+            connection, model, current, user_text, system, think, mouth,
+            voice or default_voice(),
+            speed if speed is not None else default_speed(),
+        )
 
     if message:
         turn(message)
@@ -328,7 +346,7 @@ def open_conversation(conversation_id, continue_latest, model):
     return conversations.create(brain=model)
 
 
-def run_chat_turn(connection, model, conversation, user_text, system, think, mouth, voice):
+def run_chat_turn(connection, model, conversation, user_text, system, think, mouth, voice, speed):
     conversations.append(conversation, "user", user_text)
     messages = [{"role": "system", "content": system}] + [
         {"role": entry["role"], "content": entry["content"]} for entry in conversation["messages"]
@@ -363,7 +381,7 @@ def run_chat_turn(connection, model, conversation, user_text, system, think, mou
     if mouth is not None:
         spoken = speakable(reply)
         if spoken:
-            samples, rate = mouth.engine.synth(spoken, voice=voice)
+            samples, rate = mouth.engine.synth(spoken, voice=voice, speed=speed)
             play(samples, rate)
 
 

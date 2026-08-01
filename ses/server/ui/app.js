@@ -998,6 +998,7 @@ function modelRow({
   installed,
   pull,
   rank,
+  recommended,
 }) {
   const row = document.createElement('div');
   row.className = 'mrow';
@@ -1008,7 +1009,9 @@ function modelRow({
   row.innerHTML =
     '<div class="mdetails"><div class="mname">' +
       (rank ? `<span class="rank">${rank}</span>` : '') +
-      `<span class="txt">${label}</span></div>` +
+      `<span class="txt">${label}</span>` +
+      (recommended ? `<span class="pick" title="${escapeHtml(recommended)}">recommended</span>` : '') +
+      '</div>' +
       (description ? `<div class="mdesc">${escapeHtml(description)}</div>` : '') +
     '</div>' +
     `<div class="mnum">${escapeHtml(note || '—')}</div>` +
@@ -1111,7 +1114,8 @@ function speechSection(title, note, models) {
   const row = model => modelRow({
     name: model.name,
     link: githubLink(model.github),
-    description: model.description,
+    description: model.recommended || model.description,
+    recommended: model.recommended,
     metadata: speechMetadata(model),
     note: fmtSize(model.size_gb),
     fit: model.fit,

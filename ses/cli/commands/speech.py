@@ -22,8 +22,10 @@ from ...core import transcripts
 from ...core.text import clean, collapse
 from ..ui import (
     console,
+    default_speed,
     default_stt,
     default_tts,
+    default_voice,
     error_console,
     fail,
     format_speed,
@@ -49,7 +51,7 @@ def say(
     text: str = typer.Argument(..., help='Text to speak, or "-" to read stdin.'),
     model: str = typer.Option(None, "--model", "-m", help="TTS model (default: tts-english)"),
     voice: str = typer.Option(None, "--voice", "-v", help="Voice id (ses voices)"),
-    speed: float = typer.Option(1.0, "--speed", "-s", min=0.5, max=2.0),
+    speed: float = typer.Option(None, "--speed", "-s", min=0.5, max=2.0),
     lang: str = typer.Option(None, "--lang", help="Override language (e.g. en-us, fr-fr)"),
     out: Path = typer.Option(None, "--out", "-o", help="Write a .wav/.mp3 instead of playing."),
     no_play: bool = typer.Option(False, "--no-play", help="Don't play the audio."),
@@ -66,7 +68,12 @@ def say(
 
     started = time.time()
     with console.status(f"[bold]{voice}[/bold] speaking…", spinner="dots"):
-        samples, rate = model_handle.engine.synth(text, voice=voice, speed=speed, lang=lang)
+        samples, rate = model_handle.engine.synth(
+            text,
+            voice=voice or default_voice(),
+            speed=speed if speed is not None else default_speed(),
+            lang=lang,
+        )
 
     took = time.time() - started
     duration = len(samples) / rate

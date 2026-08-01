@@ -348,7 +348,11 @@ SPEECH_MODELS = (
     ModelSpec(
         name="chatterbox-turbo",
         kind="tts",
-        description=("Chatterbox Turbo 350M, expressive English TTS with paralinguistic tags"),
+        description=((
+            "Chatterbox Turbo 350M, voice cloning and paralinguistic tags. "
+            "Measured at 16x slower than real time here, so it is for files, "
+            "not live replies"
+        )),
         backends=(
             Backend(
                 "chatterbox",
@@ -701,6 +705,12 @@ BRAINS = (
 )
 
 ALL_MODELS = SPEECH_MODELS + PIPER_MODELS
+
+RECOMMENDED = {
+    "whisper-turbo": "99 languages, 4x faster than audio, runs on every platform",
+    "kokoro": "the most downloaded open voice model, 54 voices",
+    "tts-english": "49 languages via Piper, 30x faster than audio, 61 MB",
+}
 
 FEATURED = (
     "whisper-turbo",

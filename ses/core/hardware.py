@@ -25,7 +25,9 @@ ENGINE_SPEED = {
     "onnx-asr": {APPLE: 0.65, CUDA: 0.10, CPU: 0.65},
     "whisper-cpp": {APPLE: 0.20, CUDA: 0.10, CPU: 0.60},
     "vosk": {APPLE: 0.10, CUDA: 0.10, CPU: 0.10},
-    "chatterbox": {APPLE: 1.00, CUDA: 0.25, CPU: 4.00},
+    "chatterbox": {APPLE: 16.0, CUDA: 2.00, CPU: 20.0},
+    "transformers-stt": {APPLE: 0.30, CUDA: 0.08, CPU: 0.60},
+    "transformers-tts": {APPLE: 0.15, CUDA: 0.05, CPU: 0.30},
 }
 
 

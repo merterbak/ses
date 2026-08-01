@@ -309,6 +309,11 @@ a.mfield:hover { color: var(--accent); border-color: var(--accent); }
 .mnum.accent { color: var(--accent); }
 .mact { display: flex; justify-content: flex-end; }
 .rank { color: var(--dim); font-size: 11.5px; font-variant-numeric: tabular-nums; min-width: 20px; }
+.pick {
+  color: var(--accent); border: 1px solid var(--accent); border-radius: 20px;
+  padding: 1px 8px; font-size: 10px; font-weight: 600; letter-spacing: .03em;
+  text-transform: uppercase; white-space: nowrap; flex: none;
+}
 
 /* ---- will it run here? ---- */
 .fit {

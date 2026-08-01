@@ -6,7 +6,15 @@ from rich.markup import escape
 from rich.table import Table
 from ... import DEFAULT_PORT, DEFAULT_STT, DEFAULT_TTS, SesError
 from ...core import catalog, download, hardware, llm, paths, store
-from ...core.registry import ANY, BRAINS, REGISTRY, resolve, resolve_brain
+from ...core.registry import (
+    ANY,
+    BRAINS,
+    FEATURED,
+    RECOMMENDED,
+    REGISTRY,
+    resolve,
+    resolve_brain,
+)
 from ..ui import (
     console,
     default_tts,
@@ -55,7 +63,7 @@ def register(app):
 
 def pull(
     model: str = typer.Argument(
-        ..., help="Library name (ses search) or any HF repo id (org/name)."
+        None, help="Library name (ses search) or any HF repo id (org/name)."
     ),
     engine: str = typer.Option(
         None,
@@ -70,9 +78,19 @@ def pull(
     Beyond the curated library, any compatible repo works:
     ses pull mlx-community/whisper-large-v3-mlx-4bit --engine mlx-whisper
     """
+    if not model:
+        model = choose_model()
+        if not model:
+            return
+
+    model = model.strip()
+    if model.lower().startswith(("hf.co/", "huggingface.co/")):
+        pull_ollama(model)
+        return
+
     spec = resolve(model)
     if spec is None and "/" in model:
-        pull_custom_repo(model.strip(), engine, force)
+        pull_custom_repo(model, engine, force)
         return
     if spec is None:
         brain = resolve_brain(model)
@@ -112,6 +130,83 @@ def pull(
             f"[dim](then {backend.engine} can load this model)[/dim]"
         )
 
+
+PICKER_LIMIT = 12
+
+
+def pickable(kind, ram_gb):
+    rows = []
+    for name in FEATURED:
+        spec = REGISTRY.get(name)
+        if spec is None or spec.kind != kind or spec.backend() is None:
+            continue
+        rows.append(spec)
+    for spec in REGISTRY.values():
+        if len(rows) >= PICKER_LIMIT:
+            break
+        if spec.kind != kind or spec in rows or spec.backend() is None:
+            continue
+        if spec.name.startswith("tts-") and not store.is_installed(spec.name):
+            continue
+        rows.append(spec)
+    return rows[:PICKER_LIMIT]
+
+
+def picker_table(kind, title, rows, ram_gb, start):
+    table = Table(box=None, pad_edge=False, title=title, title_justify="left",
+                  title_style="bold")
+    table.add_column("", style="dim", justify="right")
+    table.add_column("model")
+    table.add_column("size", justify="right")
+    table.add_column("fits")
+    table.add_column("")
+    for offset, spec in enumerate(rows):
+        backend = spec.backend()
+        fit = hardware.fit(backend.size_mb / 1024, ram_gb)
+        name = spec.name
+        if spec.name in RECOMMENDED:
+            name = f"{spec.name} [cyan]★[/cyan]"
+        table.add_row(
+            str(start + offset),
+            name,
+            format_size(backend.size_mb * MB),
+            f"[{fit['level']}]{fit['label']}[/{fit['level']}]" if fit["level"] in
+            ("great", "ok", "tight", "toobig") else fit["label"],
+            "[green]installed[/green]" if store.is_installed(spec.name) else "",
+        )
+    return table
+
+
+def choose_model():
+    from rich.prompt import Prompt
+
+    ram_gb = hardware.total_ram_gb()
+    stt = pickable("stt", ram_gb)
+    tts = pickable("tts", ram_gb)
+    if not stt and not tts:
+        fail("nothing to pick from, run: ses search")
+
+    console.print(picker_table("stt", "👂 Transcribe", stt, ram_gb, 1))
+    console.print()
+    console.print(picker_table("tts", "🔊 Speak", tts, ram_gb, len(stt) + 1))
+    console.print(
+        "\n[dim]pick a number, or type any model name. "
+        "See them all with[/dim] ses search"
+    )
+
+    answer = Prompt.ask("\nmodel", default="", show_default=False).strip()
+    if not answer:
+        return None
+    if answer.isdigit():
+        index = int(answer) - 1
+        ordered = stt + tts
+        if 0 <= index < len(ordered):
+            return ordered[index].name
+        fail(f"pick a number between 1 and {len(ordered)}")
+    return answer
+
+
+LARGE_DOWNLOAD_BYTES = 8 * 1024**3
 
 CUSTOM_REPO_ENGINES = (
     "mlx-whisper",
@@ -166,7 +261,18 @@ def pull_custom_repo(repo, engine, force):
             "published by mlx-community, onnx-community or Systran."
         )
 
-    console.print(f"pulling [bold]{repo}[/bold] [dim](raw repo · {engine})[/dim]")
+    size = download.remote_size(repo)
+    measured = f" · ~{format_size(size)}" if size else ""
+    console.print(f"pulling [bold]{repo}[/bold] [dim](raw repo · {engine}{measured})[/dim]")
+    if size and size > LARGE_DOWNLOAD_BYTES and not force:
+        from rich.prompt import Confirm
+
+        console.print(
+            f"[yellow]heads up:[/yellow] this repo ships {format_size(size)}, "
+            "far more than a quantized port would"
+        )
+        if not Confirm.ask("download it anyway", default=False):
+            return
     try:
         with download_progress(f"pulling {repo}") as on_progress:
             directory = store.install_custom(repo, engine, force=force, on_progress=on_progress)
@@ -180,12 +286,16 @@ def pull_custom_repo(repo, engine, force):
 
 
 def pull_brain(spec):
+    pull_ollama(spec.name, size_gb=spec.size_gb)
+
+
+def pull_ollama(name, size_gb=None):
     from .assistant import ollama_pull
 
     brain = llm.detect()
     if brain is None or brain.kind != llm.OLLAMA:
         fail(
-            f"'{spec.name}' is an LLM brain, served by Ollama, "
+            f"'{name}' is an LLM brain, served by Ollama, "
             "install it from https://ollama.com and retry"
         )
 
@@ -194,18 +304,17 @@ def pull_brain(spec):
     except Exception:
         installed = set()
 
-    if spec.name in installed or f"{spec.name}:latest" in installed:
-        console.print(f"[green]✓[/green] {spec.name} already in Ollama")
+    if name in installed or f"{name}:latest" in installed:
+        console.print(f"[green]✓[/green] {name} already in Ollama")
     else:
-        console.print(
-            f"pulling brain [bold]{spec.name}[/bold] [dim](~{spec.size_gb:g} GB · via Ollama)[/dim]"
-        )
-        ollama_pull(brain.base_url, spec.name)
-        console.print(f"[green]✓[/green] pulled [bold]{spec.name}[/bold]")
+        measured = f"~{size_gb:g} GB · " if size_gb else ""
+        console.print(f"pulling brain [bold]{name}[/bold] [dim]({measured}via Ollama)[/dim]")
+        ollama_pull(brain.base_url, name)
+        console.print(f"[green]✓[/green] pulled [bold]{name}[/bold]")
 
     console.print(
-        f"[dim]talk to it:[/dim] ses talk -b {spec.name}  "
-        f"[dim]· make it default:[/dim] ses use brain {spec.name}"
+        f"[dim]talk to it:[/dim] ses talk -b {name}  "
+        f"[dim]· make it default:[/dim] ses use llm {name}"
     )
 
 
@@ -434,25 +543,40 @@ def rm(
     console.print(f"[green]✓[/green] removed {name} (freed {size})")
 
 
+SETTINGS = {
+    "stt": DEFAULT_STT,
+    "tts": DEFAULT_TTS,
+    "llm": "(first Ollama model)",
+    "voice": "(engine default)",
+    "speed": "1.0",
+}
+
+
 def use(
-    role: str = typer.Argument(None, help="stt | tts | brain"),
-    model: str = typer.Argument(None, help="Model name, or 'default' to reset."),
+    role: str = typer.Argument(None, help="stt | tts | llm | voice | speed"),
+    model: str = typer.Argument(None, help="Value, 'default' to reset, or omit to pick."),
 ):
-    """Set the default model for a role: ses use stt whisper-small.
+    """Set a default: ses use stt whisper-small, ses use speed 1.2.
 
-    'brain' is the LLM used by `ses talk`. Run with no arguments to see the
-    current defaults.
+    'llm' is the model `ses talk` thinks with, 'voice' and 'speed' apply to
+    every spoken reply. Run with no arguments to see the current defaults.
     """
-    builtin = {"stt": DEFAULT_STT, "tts": DEFAULT_TTS, "brain": "(first Ollama model)"}
-
     if role is None:
-        print_defaults(builtin)
+        print_defaults(SETTINGS)
         return
-    if role not in builtin:
-        fail(f"unknown role '{role}'. Pick one of: stt, tts, brain")
+    role = paths.canonical_role(role)
+    if role not in SETTINGS:
+        fail(f"unknown setting '{role}'. Pick one of: {', '.join(SETTINGS)}")
+
     if model is None:
-        console.print(f"{role} → [bold]{paths.default_for(role) or builtin[role]}[/bold]")
-        return
+        current = paths.default_for(role) or SETTINGS[role]
+        console.print(f"{role} → [bold]{current}[/bold]")
+        if role in ("llm", "speed"):
+            return
+        model = choose_voice(current) if role == "voice" else choose_installed(role, current)
+        if not model:
+            return
+
     if model in ("default", "reset", "none"):
         paths.set_default(role, None)
         console.print(f"[green]✓[/green] {role} reset to built-in default")
@@ -460,28 +584,133 @@ def use(
 
     if role in ("stt", "tts"):
         model = validate_speech_default(role, model)
+    elif role == "speed":
+        model = validate_speed(model)
+    elif role == "voice":
+        validate_voice(model)
+
     paths.set_default(role, model)
     console.print(f"[green]✓[/green] default {role} → [bold]{model}[/bold]")
+
+
+def validate_speed(value):
+    try:
+        speed = float(value)
+    except ValueError:
+        fail(f"speed must be a number between 0.5 and 2.0, got '{value}'")
+    if not 0.5 <= speed <= 2.0:
+        fail(f"speed must be between 0.5 and 2.0, got {speed}")
+    return f"{speed:g}"
+
+
+def voices_of_default():
+    from ..ui import default_tts, load_model
+
+    try:
+        return load_model(default_tts(), quiet=True).engine.voices()
+    except Exception:
+        return []
+
+
+def validate_voice(voice):
+    available = voices_of_default()
+    if available and voice not in available:
+        fail(f"unknown voice '{voice}' for the default TTS model, see: ses voices")
+
+
+def choose_voice(current):
+    from rich.prompt import Prompt
+
+    available = voices_of_default()
+    if not available:
+        console.print("[dim]no voices to list, install a TTS model first:[/dim] ses pull")
+        return None
+
+    table = Table(box=None, pad_edge=False)
+    table.add_column("", style="dim", justify="right")
+    table.add_column("voice")
+    table.add_column("")
+    for index, voice in enumerate(available, 1):
+        table.add_row(str(index), voice, "[green]current[/green]" if voice == current else "")
+    console.print()
+    console.print(table)
+
+    answer = Prompt.ask("\nmake default", default="", show_default=False).strip()
+    if not answer:
+        return None
+    if answer.isdigit():
+        index = int(answer) - 1
+        if 0 <= index < len(available):
+            return available[index]
+        fail(f"pick a number between 1 and {len(available)}")
+    return answer
+
+
+def choose_installed(kind, current):
+    from rich.prompt import Prompt
+
+    installed = []
+    for manifest in store.installed():
+        if manifest.get("kind") != kind:
+            continue
+        spec = resolve(manifest["name"])
+        installed.append((manifest["name"], manifest.get("engine", ""),
+                          manifest.get("size_bytes", 0),
+                          spec.description if spec else ""))
+    if not installed:
+        console.print(f"[dim]no {kind} model installed yet, run:[/dim] ses pull")
+        return None
+
+    installed.sort(key=lambda row: row[0])
+    table = Table(box=None, pad_edge=False)
+    table.add_column("", style="dim", justify="right")
+    table.add_column("model")
+    table.add_column("engine", style="dim")
+    table.add_column("size", justify="right")
+    table.add_column("")
+    for index, (name, engine, size, _) in enumerate(installed, 1):
+        table.add_row(str(index), name, engine, format_size(size),
+                      "[green]current[/green]" if name == current else "")
+    console.print()
+    console.print(table)
+
+    answer = Prompt.ask("\nmake default", default="", show_default=False).strip()
+    if not answer:
+        return None
+    if answer.isdigit():
+        index = int(answer) - 1
+        if 0 <= index < len(installed):
+            return installed[index][0]
+        fail(f"pick a number between 1 and {len(installed)}")
+    return answer
 
 
 def print_defaults(builtin):
     settings = paths.config()
     table = Table(box=None, header_style="bold dim", pad_edge=False)
-    table.add_column("ROLE", style="bold")
-    table.add_column("MODEL")
+    table.add_column("SETTING", style="bold")
+    table.add_column("VALUE")
     table.add_column("", style="dim")
 
     for role, fallback in builtin.items():
         from_env = os.environ.get(f"SES_{role.upper()}")
+        stored = settings.get(role) or next(
+            (settings[old] for old, new in paths.ROLE_ALIASES.items()
+             if new == role and settings.get(old)), None
+        )
         if from_env:
             table.add_row(role, from_env, f"from env SES_{role.upper()}")
-        elif role in settings:
-            table.add_row(role, settings[role], "set via ses use")
+        elif stored:
+            table.add_row(role, stored, "set via ses use")
         else:
             table.add_row(role, fallback, "built-in default")
 
     console.print(table)
-    console.print("\n[dim]change with[/dim] ses use <role> <model>")
+    console.print(
+        "\n[dim]set one with[/dim]  ses use tts kokoro   ses use speed 1.2"
+        "\n[dim]or pick from a list[/dim]  ses use tts   ses use voice"
+        "\n[dim]reset with[/dim]  ses use speed default"
+    )
 
 
 def validate_speech_default(role, model):

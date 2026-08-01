@@ -1,5 +1,7 @@
 import os
+import sys
 import typer
+from rich.markup import escape
 from rich.panel import Panel
 from ... import DEFAULT_HOST, DEFAULT_PORT, __version__
 from ...core import store
@@ -59,7 +61,11 @@ def serve(
     _ = log_load_event
 
 
-def mcp():
+def mcp(
+    stdio: bool = typer.Option(
+        False, "--stdio", help="Serve even when stdin is a terminal."
+    ),
+):
     """Run ses as an MCP server, giving agents a voice.
 
     Wire it in:
@@ -76,4 +82,26 @@ def mcp():
         from ...mcp import main as run_mcp_server
     except ImportError:
         fail("MCP support needs the 'mcp' package, install with: pip install 'ses[mcp]'")
+
+    if sys.stdin.isatty() and not stdio:
+        explain_mcp()
+        return
     run_mcp_server()
+
+
+def explain_mcp():
+    console.print(
+        Panel.fit(
+            "[bold]ses mcp[/bold] speaks the Model Context Protocol over stdin and "
+            "stdout.\nIt is meant to be launched by an agent, not run by hand.\n\n"
+            "[bold]Claude Code[/bold]\n  claude mcp add ses -- ses mcp\n\n"
+            "[bold]Codex[/bold]  [dim]~/.codex/config.toml[/dim]\n"
+            "  " + escape("[mcp_servers.ses]") + "\n"
+            "  command = \"ses\"\n"
+            "  args = " + escape('["mcp"]') + "\n\n"
+            "[dim]Once wired in, your agent can speak, listen and transcribe locally.\n"
+            "To pipe protocol messages yourself, use:[/dim] ses mcp --stdio",
+            title="not an interactive command",
+            border_style="yellow",
+        )
+    )
