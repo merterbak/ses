@@ -1,4 +1,9 @@
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("ses")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 11435
